@@ -2,4 +2,5 @@
 *.so
 *.obj
 *.out
+*.orig
 dwm

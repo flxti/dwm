@@ -2,7 +2,8 @@
 
 /* appearance */
 static const unsigned int borderpx  = 1;        /* border pixel of windows */
-static const int rmaster = 1;                   /* 1 means master 1 is initially on the right */
+static const int gappx              = 5;        /* gaps between windows */
+static const int rmaster            = 1;        /* 1 means master 1 is initially on the right */
 static const unsigned int snap      = 32;       /* snap pixel */
 static const int showbar            = 1;        /* 0 means no bar */
 static const int topbar             = 1;        /* 0 means bottom bar */
@@ -110,6 +111,9 @@ static Key keys[] = {
 	{ Mod4Mask,                     XK_m,      spawn,          {.v = volume_mute_cmd } },
 	{ Mod4Mask,                     XK_o,      spawn,          {.v = lock_cmd } },
 	{ Mod4Mask,                     XK_p,      spawn,          {.v = lock_suspend_cmd } },
+	{ MODKEY,                       XK_minus,  setgaps,        {.i = -5 } },
+	{ MODKEY,                       XK_equal,  setgaps,        {.i = +5 } },
+	{ MODKEY|ShiftMask,             XK_equal,  setgaps,        {.i = 0  } },
 	TAGKEYS(                        XK_1,                      0)
 	TAGKEYS(                        XK_2,                      1)
 	TAGKEYS(                        XK_3,                      2)
