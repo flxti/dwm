@@ -3,4 +3,5 @@
 *.obj
 *.out
 *.orig
+*.rej
 dwm
