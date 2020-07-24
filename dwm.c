@@ -1657,7 +1657,7 @@ setlayout(const Arg *arg)
 	if (selmon->sel)
 		arrange(selmon);
 	else
-		drawbar(selmon);
+    drawbars();
 }
 
 /* arg > 1.0 will set mfact absolutely */
@@ -2237,7 +2237,6 @@ void
 updatestatus(void)
 {
 	char rawstext[256];
-  Monitor* m;
 
 	if (gettextprop(root, XA_WM_NAME, rawstext, sizeof rawstext)) {
                 int i = -1, j = 0, k = 0, l = 0;
@@ -2258,8 +2257,7 @@ updatestatus(void)
                 strcpy(stexts, stextc);
                 wstext = TEXTW(stextc);
         }
-        for (m = mons; m; m = m->next)
-                drawbar(selmon);
+  drawbars();
 }
 
 void
