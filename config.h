@@ -104,8 +104,11 @@ static const char *lock_suspend_cmd[] = { "slock", "systemctl", "suspend", NULL 
 /* screenshots */
 
 //#bindsym --release Shift+Print exec scrot -s 'screenshot_%Y%m%d_%H%M%S.png' -e 'mkdir -p ~/Pictures/Screenshots && mv $f ~/Pictures/Screenshots && xclip -selection clipboard -t image/png -i ~/Pictures/Screenshots/`ls -1 -t ~/Pictures/Screenshots | head -1`' # Area selection
-static const char *screenshot_cmd[] = {"scrot", "-z", "-o", "/tmp/screenshot_%Y%m%d_%H%M%S.png", NULL };
-static const char *screenshot_focus_cmd[] = {"scrot", "-z", "-o", "-u", "/tmp/screenshot_%Y%m%d_%H%M%S.png", NULL };
+static const char *screenshot_cmd[] = { "scrot", "-z", "-o", "/tmp/screenshot_%Y%m%d_%H%M%S.png", NULL };
+static const char *screenshot_focus_cmd[] = { "scrot", "-z", "-o", "-u", "/tmp/screenshot_%Y%m%d_%H%M%S.png", NULL };
+/*keyboard backlight brightnessctl --device='tpacpi::kbd_backlight' set 0 */
+static const char *keyboard_backlight_off_cmd[] = { "brightnessctl","-q", "--device=tpacpi::kbd_backlight", "set", "1-", NULL };
+static const char *keyboard_backlight_on_cmd[] = { "brightnessctl", "-q", "--device=tpacpi::kbd_backlight", "set", "+1", NULL };
 
 static Key keys[] = {
 	/* modifier                     key        function        argument */
@@ -154,7 +157,9 @@ static Key keys[] = {
 	{ Mod4Mask,                     XK_o,      spawn,          {.v = lock_cmd } },
 	{ Mod4Mask,                     XK_p,      spawn,          {.v = lock_suspend_cmd } },
 	{ Mod4Mask,                     XK_s,      spawn,          {.v = screenshot_cmd} },
-	{ Mod4Mask,                     XK_f,      spawn,          {.v = screenshot_focus_cmd} },
+	{ Mod4Mask,                     XK_f,      spawn,          {.v = screenshot_focus_cmd } },
+	{ Mod4Mask|ShiftMask,           XK_k,      spawn,          {.v = keyboard_backlight_off_cmd } },
+	{ MODKEY|ShiftMask,             XK_k,      spawn,          {.v = keyboard_backlight_on_cmd } },
 	{ Mod4Mask|ShiftMask,           XK_s,      spawn,          SHCMD("sleep 1s;scrot -s -o -z /tmp/screenshot_%Y%m%d_%H%M%S.png") },
 	{ Mod4Mask,                     XK_c,      spawn,          SHCMD("sleep 1s;scrot -s -o -z -e 'sxiv -b $f'") },
 	{ MODKEY,                       XK_minus,  setgaps,        {.i = -5 } },
