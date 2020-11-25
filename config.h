@@ -1,7 +1,7 @@
 /* See LICENSE file for copyright and license details. */
 
 /* appearance */
-static const unsigned int borderpx  = 1;        /* border pixel of windows */
+static const unsigned int borderpx  = 2;        /* border pixel of windows */
 static const int gappx              = 5;        /* gap size between windows */
 static const int rmaster            = 1;        /* 1 means master is initially on the right */
 static const unsigned int snap      = 32;       /* snap pixel */
@@ -87,6 +87,7 @@ static const Layout layouts[] = {
 static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() */
 static const char *dmenucmd[] = { "dmenu_run", "-m", dmenumon, "-fn", dmenufont, "-nb", col_gray1, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, "-bw", "2", NULL };
 static const char *termcmd[]  = { "st", "-e", "tmux", NULL };
+static const char *stcmd[]  = { "st", NULL };
 static const char *ranger_cmd[] = { "st", "-e", "ranger" };
 /* brightness */
 static const char *brightness_inc_cmd[] = { "xbacklight", "-inc", "5", NULL};
@@ -100,11 +101,17 @@ static const char *volume_pkill[] = { "pkill", "-RTMIN+1", "dwmblocks", NULL };
 /* lock */
 static const char *lock_cmd[] =         { "slock", NULL };
 static const char *lock_suspend_cmd[] = { "slock", "systemctl", "suspend", NULL };
+/* screenshots */
+
+//#bindsym --release Shift+Print exec scrot -s 'screenshot_%Y%m%d_%H%M%S.png' -e 'mkdir -p ~/Pictures/Screenshots && mv $f ~/Pictures/Screenshots && xclip -selection clipboard -t image/png -i ~/Pictures/Screenshots/`ls -1 -t ~/Pictures/Screenshots | head -1`' # Area selection
+static const char *screenshot_cmd[] = {"scrot", "-z", "-o", "/tmp/screenshot_%Y%m%d_%H%M%S.png", NULL };
+static const char *screenshot_focus_cmd[] = {"scrot", "-z", "-o", "-u", "/tmp/screenshot_%Y%m%d_%H%M%S.png", NULL };
 
 static Key keys[] = {
 	/* modifier                     key        function        argument */
 	{ MODKEY,                       XK_d,      spawn,          {.v = dmenucmd } },
 	{ Mod4Mask,                     XK_Return, spawn,          {.v = termcmd } },
+	{ Mod4Mask,                     XK_t,      spawn,          {.v = stcmd} },
 	{ MODKEY,                       XK_r,      spawn,          {.v = ranger_cmd } },
 	{ MODKEY,                       XK_b,      togglebar,      {0} },
 	{ MODKEY,                       XK_j,      focusstack,     {.i = +1 } },
@@ -116,10 +123,10 @@ static Key keys[] = {
 	{ MODKEY,                       XK_h,      setmfact,       {.f = -0.05} },
 	{ MODKEY,                       XK_l,      setmfact,       {.f = +0.05} },
 	{ MODKEY,                       XK_Return, zoom,           {0} },
-	{ MODKEY,                       XK_n,      focusmaster,    {0} },
+	{ MODKEY,                       XK_n,      focusmaster,    {0}},
 	{ MODKEY,                       XK_Tab,    view,           {0} },
 	{ MODKEY,                       XK_q,      killclient,     {0} },
-	{ MODKEY,                       XK_t,      setlayout,      {.v = &layouts[0]} },
+	{ MODKEY,                       XK_x,      setlayout,      {.v = &layouts[0]} },
 	{ MODKEY,                       XK_f,      setlayout,      {.v = &layouts[1]} },
 	{ MODKEY,                       XK_m,      setlayout,      {.v = &layouts[2]} },
 	{ MODKEY,                       XK_c,      setlayout,      {.v = &layouts[3]} },
@@ -146,6 +153,10 @@ static Key keys[] = {
 	{ Mod4Mask,                     XK_m,      spawn,          {.v = volume_pkill } },
 	{ Mod4Mask,                     XK_o,      spawn,          {.v = lock_cmd } },
 	{ Mod4Mask,                     XK_p,      spawn,          {.v = lock_suspend_cmd } },
+	{ Mod4Mask,                     XK_s,      spawn,          {.v = screenshot_cmd} },
+	{ Mod4Mask,                     XK_f,      spawn,          {.v = screenshot_focus_cmd} },
+	{ Mod4Mask|ShiftMask,           XK_s,      spawn,          SHCMD("sleep 1s;scrot -s -o -z /tmp/screenshot_%Y%m%d_%H%M%S.png") },
+	{ Mod4Mask,                     XK_c,      spawn,          SHCMD("sleep 1s;scrot -s -o -z -e 'sxiv -b $f'") },
 	{ MODKEY,                       XK_minus,  setgaps,        {.i = -5 } },
 	{ MODKEY,                       XK_equal,  setgaps,        {.i = +5 } },
 	{ MODKEY|ShiftMask,             XK_equal,  setgaps,        {.i = 0  } },
