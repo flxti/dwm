@@ -135,6 +135,7 @@ static Key keys[] = {
 	{ MODKEY,                       XK_q,      killclient,     {0} },
 	{ MODKEY,                       XK_c,      setlayout,      {.v = &layouts[0]} },
 	{ MODKEY|ShiftMask,             XK_f,      setlayout,      {.v = &layouts[1]} },
+	{ Mod4Mask|ShiftMask,           XK_f,      togglefakefullscreen, {0} },
 	{ MODKEY,                       XK_m,      setlayout,      {.v = &layouts[2]} },
 	{ MODKEY,                       XK_x,      setlayout,      {.v = &layouts[3]} },
     { MODKEY,                       XK_u,      setlayout,      {.v = &layouts[4]} },
