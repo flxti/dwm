@@ -798,9 +798,14 @@ createmon(void)
 void
 deck(Monitor *m) {
 	unsigned int i, n, h, mw, my, ns;
+    float mfacts = 0;
 	Client *c;
 
-	for(n = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), n++);
+	for(n = 0, c = nexttiled(m->clients); c; c = nexttiled(c->next), n++) {
+        if (n < m->nmaster)
+            mfacts += c->cfact;
+    }
+
 	if(n == 0)
 		return;
 	if(n == 1){
@@ -818,20 +823,21 @@ deck(Monitor *m) {
 	}
 	else {
 		mw = m->ww;
-    ns = 1;
-  }
-	for(i = 0, my = m->gappx, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++)
-		if(i < m->nmaster) {
-			h = (m->wh - my) / (MIN(n, m->nmaster) - i) - m->gappx;
-			resize(c, m->rmaster ? m->wx + m->ww - mw + m->gappx : m->wx + m->gappx,
-			       m->wy + my, mw - (2*c->bw) - m->gappx*(5-ns)/2, h - (2*c->bw), False);
-      if (my + HEIGHT(c) + m->gappx < m->wh)
-        my += HEIGHT(c) + m->gappx;
-		}
-		else
-			resize(c, m->rmaster ? m->wx + m->gappx/ns : m->wx + mw + m->gappx/ns,
-             m->wy + m->gappx, m->ww - mw - (2*c->bw) - m->gappx*(5-ns)/2, 
-             m->wh - (2*c->bw) - 2*m->gappx, False);
+        ns = 1;
+    }
+    for(i = 0, my = m->gappx, c = nexttiled(m->clients); c; c = nexttiled(c->next), i++)
+        if(i < m->nmaster) {
+            h = (m->wh - my) / (c->cfact / mfacts) - m->gappx;
+            resize(c, m->rmaster ? m->wx + m->ww - mw + m->gappx : m->wx + m->gappx,
+                    m->wy + my, mw - (2*c->bw) - m->gappx*(5-ns)/2, h - (2*c->bw), False);
+            if (my + HEIGHT(c) + m->gappx < m->wh)
+                my += HEIGHT(c) + m->gappx;
+            mfacts -= c->cfact;
+        }
+        else
+            resize(c, m->rmaster ? m->wx + m->gappx/ns : m->wx + mw + m->gappx/ns,
+                    m->wy + m->gappx, m->ww - mw - (2*c->bw) - m->gappx*(5-ns)/2, 
+                    m->wh - (2*c->bw) - 2*m->gappx, False);
 }
 
 void
