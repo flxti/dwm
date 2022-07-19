@@ -90,18 +90,18 @@ static const Layout layouts[] = {
 /* commands */
 static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() */
 static const char *dmenucmd[] = { "dmenu_run", "-m", dmenumon, "-fn", dmenufont, "-nb", col_gray4, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, NULL };
-static const char *termcmd[]  = { "st", "-e", "tmux", NULL };
-static const char *stcmd[]  = { "st", NULL };
-static const char *ranger_cmd[] = { "st", "-e", "ranger", NULL };
+static const char *termcmd[]  = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", "-e", "tmux", NULL };
+static const char *stcmd[]  = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", NULL };
+static const char *ranger_cmd[] = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", "-e", "ranger", NULL };
 static const char *chromium_cmd[] = { "chromium", NULL };
 /* brightness */
 static const char *brightness_inc_cmd[] = { "xbacklight", "-inc", "3", NULL};
 static const char *brightness_dec_cmd[] = { "xbacklight", "-dec", "3", NULL };
 static const char *brightness_pkill[] = { "pkill", "-RTMIN+2", "dwmblocks", NULL };
 /* volume */
-static const char *volume_inc_cmd[] =   { "pactl", "set-sink-volume", "1", "+3%", NULL };
-static const char *volume_dec_cmd[] =   { "pactl", "set-sink-volume", "1", "-3%", NULL };
-static const char *volume_mute_cmd[] =  { "pactl", "set-sink-mute", "1", "toggle", NULL };
+static const char *volume_inc_cmd[] =   { "pactl", "set-sink-volume", "0", "+3%", NULL };
+static const char *volume_dec_cmd[] =   { "pactl", "set-sink-volume", "0", "-3%", NULL };
+static const char *volume_mute_cmd[] =  { "pactl", "set-sink-mute", "0", "toggle", NULL };
 static const char *volume_pkill[] = { "pkill", "-RTMIN+1", "dwmblocks", NULL };
 /* lock */
 static const char *lock_cmd[] =         { "slock", NULL };
