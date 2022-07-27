@@ -2425,6 +2425,7 @@ setup(void)
 	cursor[CurResizeBL] = drw_cur_create(drw, XC_bottom_left_corner);
 	cursor[CurResizeTR] = drw_cur_create(drw, XC_top_right_corner);
 	cursor[CurResizeTL] = drw_cur_create(drw, XC_top_left_corner);
+    cursor[CurResize] = drw_cur_create(drw, XC_sizing);
 	cursor[CurMove] = drw_cur_create(drw, XC_fleur);
 	cursor[CurResizeHorzArrow] = drw_cur_create(drw, XC_sb_h_double_arrow);
 	cursor[CurResizeVertArrow] = drw_cur_create(drw, XC_sb_v_double_arrow);
