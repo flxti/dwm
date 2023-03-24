@@ -4,7 +4,6 @@ VERSION = 6.4
 # Customize below to fit your system
 
 # paths
-#PREFIX = /usr/local
 PREFIX = ${HOME}/.local
 MANPREFIX = ${PREFIX}/share/man
 

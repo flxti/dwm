@@ -3204,7 +3204,7 @@ wintomon(Window w)
 	int x, y;
 	Client *c;
 	Monitor *m;
-
+    
 	if (w == root && getrootptr(&x, &y))
 		return recttomon(x, y, 1, 1);
 	for (m = mons; m; m = m->next)
