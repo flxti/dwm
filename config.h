@@ -89,8 +89,7 @@ static const Layout layouts[] = {
 #define SHCMD(cmd) { .v = (const char*[]){ "/bin/sh", "-c", cmd, NULL } }
 
 /* commands */
-static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() */
-static const char *dmenucmd[] = { "dmenu_run", "-m", dmenumon, "-fn", dmenufont, "-nb", col_gray4, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, NULL };
+static const char *dmenucmd[] = { "dmenu_run", "-fn", dmenufont, "-nb", col_gray4, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, NULL };
 static const char *termcmd[]  = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", "-e", "tmux", NULL };
 static const char *stcmd[]  = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", NULL };
 static const char *ranger_cmd[] = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", "-e", "ranger", NULL };
