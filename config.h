@@ -90,6 +90,7 @@ static const Layout layouts[] = {
 
 /* commands */
 static const char *dmenucmd[] = { "dmenu_run", "-fn", dmenufont, "-nb", col_gray4, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, NULL };
+static const char *passmenu_cmd[] =         { "passmenu", NULL };
 static const char *termcmd[]  = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", "-e", "tmux", NULL };
 static const char *stcmd[]  = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", NULL };
 static const char *ranger_cmd[] = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", "-e", "ranger", NULL };
@@ -171,6 +172,7 @@ static const Key keys[] = {
 	{ Mod4Mask,                     XK_m,      spawn,          {.v = volume_mute_cmd } },
 	{ Mod4Mask,                     XK_m,      spawn,          {.v = volume_pkill } },
 	{ Mod4Mask,                     XK_o,      spawn,          {.v = lock_cmd } },
+	{ MODKEY,                       XK_p,      spawn,          {.v = passmenu_cmd } },
 	{ Mod4Mask,                     XK_p,      spawn,          {.v = lock_suspend_cmd } },
 	{ Mod4Mask,                     XK_s,      spawn,          {.v = screenshot_cmd} },
 	{ Mod4Mask,                     XK_f,      spawn,          {.v = screenshot_focus_cmd } },
