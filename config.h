@@ -88,6 +88,7 @@ static const Layout layouts[] = {
 /* helper for spawning shell commands in the pre dwm-5.0 fashion */
 #define SHCMD(cmd) { .v = (const char*[]){ "/bin/sh", "-c", cmd, NULL } }
 
+static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() */
 /* commands */
 static const char *dmenucmd[] = { "dmenu_run", "-fn", dmenufont, "-nb", col_gray4, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, NULL };
 static const char *switch_win_cmd[] = { "dmenu_switch_win", "-fn", dmenufont, "-nb", col_gray4, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, NULL };
