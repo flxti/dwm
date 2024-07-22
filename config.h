@@ -90,6 +90,8 @@ static const Layout layouts[] = {
 
 /* commands */
 static const char *dmenucmd[] = { "dmenu_run", "-fn", dmenufont, "-nb", col_gray4, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, NULL };
+static const char *switch_win_cmd[] = { "dmenu_switch_win", "-fn", dmenufont, "-nb", col_gray4, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, NULL };
+static const char *goto_win_cmd[] = { "dmenu_goto_win", "-fn", dmenufont, "-nb", col_gray4, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, NULL };
 static const char *passmenu_cmd[] =         { "passmenu", NULL };
 static const char *termcmd[]  = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", "-e", "tmux", NULL };
 static const char *stcmd[]  = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", NULL };
@@ -117,6 +119,8 @@ static const char *keyboard_backlight_on_cmd[] = { "brightnessctl", "-q", "--dev
 static const Key keys[] = {
 	/* modifier                     key        function        argument */
 	{ MODKEY,                       XK_d,      spawn,          {.v = dmenucmd } },
+	{ MODKEY,                       XK_w,      spawn,          {.v = switch_win_cmd } },
+	{ Mod4Mask,                     XK_space,  spawn,          {.v = goto_win_cmd } },
 	{ Mod4Mask,                     XK_Return, spawn,          {.v = termcmd } },
 	{ MODKEY,                       XK_t,      spawn,          {.v = stcmd} },
 	{ MODKEY,                       XK_r,      spawn,          {.v = ranger_cmd } },
