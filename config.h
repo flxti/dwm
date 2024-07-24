@@ -2,6 +2,8 @@
 
 /* appearance */
 static const unsigned int borderpx  = 2;        /* border pixel of windows */
+static const unsigned int tabModKey = 0x85;
+static const unsigned int tabCycleKey = 0x17;
 static const int gappx              = 0;        /* gap size between windows */
 static const int rmaster            = 1;        /* 1 means master is initially on the right */
 static const unsigned int snap      = 32;       /* snap pixel */
@@ -141,6 +143,8 @@ static const Key keys[] = {
 	{ MODKEY,                       XK_Return, zoom,           {0} },
 	{ MODKEY,                       XK_n,      focusmaster,    {0}},
 	{ MODKEY,                       XK_Tab,    view,           {0} },
+	{ Mod4Mask,                     XK_w,      winview,        {0} },
+	{ Mod4Mask,                     XK_Tab,    alttab,         {0} },
 	{ MODKEY,                       XK_q,      killclient,     {0} },
 	{ MODKEY,                       XK_c,      setlayout,      {.v = &layouts[0]} },
 	{ MODKEY|ShiftMask,             XK_f,      setlayout,      {.v = &layouts[1]} },
