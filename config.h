@@ -145,6 +145,7 @@ static const Key keys[] = {
 	{ MODKEY,                       XK_Tab,    view,           {0} },
 	{ Mod4Mask,                     XK_w,      winview,        {0} },
 	{ Mod4Mask,                     XK_Tab,    alttab,         {0} },
+ 	{ MODKEY,                       XK_a,      spawn,          SHCMD("skippy-xd --switch --expose") },
 	{ MODKEY,                       XK_q,      killclient,     {0} },
 	{ MODKEY,                       XK_c,      setlayout,      {.v = &layouts[0]} },
 	{ MODKEY|ShiftMask,             XK_f,      setlayout,      {.v = &layouts[1]} },
