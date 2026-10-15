@@ -89,6 +89,7 @@ static const Layout layouts[] = {
 
 /* helper for spawning shell commands in the pre dwm-5.0 fashion */
 #define SHCMD(cmd) { .v = (const char*[]){ "/bin/sh", "-c", cmd, NULL } }
+static const char * const stconfig = "SauceCodePro NF:size=12:antialias=true:autohint=true";
 
 static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() */
 /* commands */
@@ -96,18 +97,18 @@ static const char *dmenucmd[] = { "dmenu_run", "-fn", dmenufont, "-nb", col_gray
 static const char *switch_win_cmd[] = { "dmenu_switch_win", NULL };
 static const char *goto_win_cmd[] = { "dmenu_goto_win", "-fn", dmenufont, "-nb", col_gray4, "-nf", col_white, "-sb", col_cyan, "-sf", col_white, NULL };
 static const char *passmenu_cmd[] =         { "passmenu", NULL };
-static const char *termcmd[]  = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", "-e", "tmux", NULL };
-static const char *stcmd[]  = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", NULL };
-static const char *ranger_cmd[] = { "st", "-f", "SauceCodePro NF:size=12:antialias=true:autohint=true", "-e", "ranger", NULL };
-static const char *chromium_cmd[] = { "chromium", NULL };
+static const char *termcmd[]  = { "st", "-f", stconfig, "-e", "tmux", NULL };
+static const char *stcmd[]  = { "st", "-f", stconfig, NULL };
+static const char *ranger_cmd[] = { "st", "-f", stconfig, "-e", "ranger", NULL };
+static const char *chromium_cmd[] = { "chromium", "--incognito", "--disk-cache-dir=/home/flx/.cache/chromium-cache", NULL };
 /* brightness */
 static const char *brightness_inc_cmd[] = { "xbacklight", "-inc", "3", NULL};
 static const char *brightness_dec_cmd[] = { "xbacklight", "-dec", "3", NULL };
 static const char *brightness_pkill[] = { "pkill", "-RTMIN+2", "dwmblocks", NULL };
 /* volume */
-static const char *volume_inc_cmd[] =   { "pactl", "set-sink-volume", "0", "+3%", NULL };
-static const char *volume_dec_cmd[] =   { "pactl", "set-sink-volume", "0", "-3%", NULL };
-static const char *volume_mute_cmd[] =  { "pactl", "set-sink-mute", "0", "toggle", NULL };
+static const char *volume_inc_cmd[] =   { "pactl", "set-sink-volume", "3", "+3%", NULL };
+static const char *volume_dec_cmd[] =   { "pactl", "set-sink-volume", "3", "-3%", NULL };
+static const char *volume_mute_cmd[] =  { "pactl", "set-sink-mute", "3", "toggle", NULL };
 static const char *volume_pkill[] = { "pkill", "-RTMIN+1", "dwmblocks", NULL };
 /* lock */
 static const char *lock_cmd[] =         { "slock", NULL };
