@@ -75,8 +75,10 @@ enum { SchemeNorm, SchemeSel, SchemeCol1, SchemeCol2, SchemeCol3,
 enum { NetSupported, NetWMName, NetWMState, NetWMCheck,
        NetWMFullscreen, NetActiveWindow, NetWMWindowType,
        NetWMWindowTypeDialog, NetClientList, NetClientListStacking, NetDesktopNames,
-       NetDesktopViewport, NetNumberOfDesktops, NetCurrentDesktop,NetLast }; /* EWMH atoms */
+       NetDesktopViewport, NetNumberOfDesktops, NetCurrentDesktop, NetClientInfo, NetLast }; /* EWMH atoms */
 enum { WMProtocols, WMDelete, WMState, WMTakeFocus, WMLast }; /* default atoms */
+enum { ClientInfoTags, ClientInfoMon, ClientInfoFloating, ClientInfoCfact,
+       ClientInfoIndex, ClientInfoLast }; /* _NET_CLIENT_INFO fields */
 enum { ClkTagBar, ClkLtSymbol, ClkStatusText, ClkWinTitle,
        ClkClientWin, ClkRootWin, ClkLast }; /* clicks */
 
@@ -209,8 +211,10 @@ static void focusmaster(const Arg *arg);
 static void focusmon(const Arg *arg);
 static void focusnext(const Arg *arg);
 static void focusstack(const Arg *arg);
+static long ftol(float f);
 void gaplessgrid(Monitor *m);
 static Atom getatomprop(Client *c, Atom prop);
+static int getclientinfo(Window w, long *info);
 static int getrootptr(int *x, int *y);
 static long getstate(Window w);
 static int gettextprop(Window w, Atom atom, char *text, unsigned int size);
@@ -219,6 +223,7 @@ static void grabkeys(void);
 static void incnmaster(const Arg *arg);
 static void keypress(XEvent *e);
 static void killclient(const Arg *arg);
+static float ltof(long l);
 static void losefullscreen(Client *sel, Client *next);
 static void manage(Window w, XWindowAttributes *wa);
 static void mappingnotify(XEvent *e);
@@ -241,11 +246,14 @@ static void resize(Client *c, int x, int y, int w, int h, int interact);
 static void resizeclient(Client *c, int x, int y, int w, int h);
 static void resizemouse(const Arg *arg);
 static void restack(Monitor *m);
+static void restoresession(void);
 static void run(void);
+static void savesession(void);
 static void scan(void);
 static int sendevent(Client *c, Atom proto);
 static void sendmon(Client *c, Monitor *m);
 static void setclientstate(Client *c, long state);
+static void setclienttagprop(Client *c);
 static void setcurrentdesktop(void);
 static void setdesktopnames(void);
 static void setfocus(Client *c);
@@ -351,6 +359,9 @@ struct Pertag {
 	const Layout *ltidxs[LENGTH(tags) + 1][2]; /* matrix of tags and layouts indexes  */
 	int showbars[LENGTH(tags) + 1]; /* display bar for the current tag */
 };
+
+/* _DWM_MON_STATE_<n>: 10 monitor fields, then 6 fields per pertag entry */
+#define MONSTATELEN             (10 + 6 * (LENGTH(tags) + 1))
 
 /* compile-time check if all tags fit into an unsigned int bit array. */
 struct NumTags { char limitexceeded[LENGTH(tags) > 31 ? -1 : 1]; };
@@ -1612,6 +1623,41 @@ getatomprop(Client *c, Atom prop)
 	return atom;
 }
 
+/* floats are stored bit-exact in 32-bit CARDINAL properties */
+long
+ftol(float f)
+{
+	union { float f; unsigned int u; } v = { .f = f };
+
+	return v.u;
+}
+
+float
+ltof(long l)
+{
+	union { float f; unsigned int u; } v = { .u = l };
+
+	return v.f;
+}
+
+int
+getclientinfo(Window w, long *info)
+{
+	int format, n = 0;
+	unsigned long nitems, extra;
+	unsigned char *p = NULL;
+	Atom type;
+
+	if (XGetWindowProperty(dpy, w, netatom[NetClientInfo], 0L, ClientInfoLast, False,
+		XA_CARDINAL, &type, &format, &nitems, &extra, &p) == Success && p) {
+		if (type == XA_CARDINAL && format == 32)
+			for (; n < nitems && n < ClientInfoLast; n++)
+				info[n] = ((long *)p)[n];
+		XFree(p);
+	}
+	return n;
+}
+
 int
 getrootptr(int *x, int *y)
 {
@@ -1778,6 +1824,9 @@ manage(Window w, XWindowAttributes *wa)
 	Client *c, *t = NULL;
 	Window trans = None;
 	XWindowChanges wc;
+	Monitor *m;
+	long info[ClientInfoLast];
+	int n;
 
 	c = ecalloc(1, sizeof(Client));
 	c->win = w;
@@ -1797,6 +1846,19 @@ manage(Window w, XWindowAttributes *wa)
 		c->mon = selmon;
 		applyrules(c);
 	}
+	if ((n = getclientinfo(c->win, info)) > ClientInfoMon) {
+		if (info[ClientInfoTags] & TAGMASK)
+			c->tags = info[ClientInfoTags] & TAGMASK;
+		for (m = mons; m; m = m->next)
+			if (m->num == info[ClientInfoMon]) {
+				c->mon = m;
+				break;
+			}
+		if (n > ClientInfoFloating)
+			c->isfloating = info[ClientInfoFloating];
+		if (n > ClientInfoCfact && ltof(info[ClientInfoCfact]) > 0)
+			c->cfact = ltof(info[ClientInfoCfact]);
+	}
 
 	if (c->x + WIDTH(c) > c->mon->wx + c->mon->ww)
 		c->x = c->mon->wx + c->mon->ww - WIDTH(c);
@@ -1813,6 +1875,7 @@ manage(Window w, XWindowAttributes *wa)
 	updatewindowtype(c);
 	updatesizehints(c);
 	updatewmhints(c);
+	setclienttagprop(c);
 	XSelectInput(dpy, w, EnterWindowMask|FocusChangeMask|PropertyChangeMask|StructureNotifyMask);
 	grabbuttons(c, 0);
 	if (!c->isfloating)
@@ -2093,6 +2156,7 @@ placemouse(const Arg *arg)
 		attachstack(c);
 		selmon = m;
 	}
+	setclienttagprop(c);
 
 	focus(c);
 	c->beingmoved = 0;
@@ -2352,6 +2416,98 @@ restack(Monitor *m)
 }
 
 void
+restoresession(void)
+{
+	Atom atom, type;
+	Client *c, **cs;
+	Monitor *m;
+	char name[32];
+	int format, i, j, k, n;
+	long *d, *idx, t, info[ClientInfoLast];
+	float f;
+	unsigned char *p;
+	unsigned long nitems, extra;
+
+	for (m = mons; m; m = m->next) {
+		/* restore client order, clients without a saved index go last */
+		for (n = 0, c = m->clients; c; c = c->next, n++);
+		cs = ecalloc(n + 1, sizeof(Client *));
+		idx = ecalloc(n + 1, sizeof(long));
+		for (i = 0, c = m->clients; c; c = c->next, i++) {
+			cs[i] = c;
+			idx[i] = getclientinfo(c->win, info) > ClientInfoIndex
+				? info[ClientInfoIndex] : n + i;
+		}
+		for (i = 1; i < n; i++) /* stable insertion sort */
+			for (j = i; j > 0 && idx[j - 1] > idx[j]; j--) {
+				c = cs[j], cs[j] = cs[j - 1], cs[j - 1] = c;
+				t = idx[j], idx[j] = idx[j - 1], idx[j - 1] = t;
+			}
+		for (i = 0; i < n; i++)
+			cs[i]->next = cs[i + 1];
+		m->clients = cs[0];
+		free(cs);
+		free(idx);
+
+		/* restore monitor and pertag settings */
+		snprintf(name, sizeof name, "_DWM_MON_STATE_%d", m->num);
+		atom = XInternAtom(dpy, name, False);
+		p = NULL;
+		if (XGetWindowProperty(dpy, root, atom, 0L, MONSTATELEN, False, XA_CARDINAL,
+			&type, &format, &nitems, &extra, &p) != Success || !p)
+			continue;
+		d = (long *)p;
+		if (type != XA_CARDINAL || format != 32 || nitems != MONSTATELEN
+		|| d[0] != LENGTH(tags) || d[6] < 0 || d[6] > LENGTH(tags)
+		|| d[7] < 0 || d[7] > LENGTH(tags)) {
+			XFree(p);
+			continue;
+		}
+		m->tagset[0] = d[1] & TAGMASK ? d[1] & TAGMASK : 1;
+		m->tagset[1] = d[2] & TAGMASK ? d[2] & TAGMASK : 1;
+		m->seltags = d[3] & 1;
+		m->rmaster = d[4];
+		m->gappx = MAX(d[5], 0);
+		m->pertag->curtag = d[6];
+		m->pertag->prevtag = d[7];
+		if (d[8])
+			selmon = m;
+		for (c = m->clients; c; c = c->next)
+			if (c->win == (Window)d[9]) {
+				detachstack(c);
+				attachstack(c);
+				break;
+			}
+		for (i = 0; i <= LENGTH(tags); i++) {
+			k = 10 + 6 * i;
+			m->pertag->nmasters[i] = MAX(d[k], 0);
+			if ((f = ltof(d[k + 1])) >= 0.05 && f <= 0.95)
+				m->pertag->mfacts[i] = f;
+			m->pertag->sellts[i] = d[k + 2] & 1;
+			for (j = 0; j < 2; j++)
+				if (d[k + 3 + j] >= 0 && d[k + 3 + j] < LENGTH(layouts))
+					m->pertag->ltidxs[i][j] = &layouts[d[k + 3 + j]];
+			m->pertag->showbars[i] = !!d[k + 5];
+		}
+		XFree(p);
+
+		m->nmaster = m->pertag->nmasters[m->pertag->curtag];
+		m->mfact = m->pertag->mfacts[m->pertag->curtag];
+		m->sellt = m->pertag->sellts[m->pertag->curtag];
+		m->lt[m->sellt] = m->pertag->ltidxs[m->pertag->curtag][m->sellt];
+		m->lt[m->sellt^1] = m->pertag->ltidxs[m->pertag->curtag][m->sellt^1];
+		if (m->showbar != m->pertag->showbars[m->pertag->curtag]) {
+			m->showbar = m->pertag->showbars[m->pertag->curtag];
+			updatebarpos(m);
+			XMoveResizeWindow(dpy, m->barwin, m->wx, m->by, m->ww, bh);
+		}
+	}
+	focus(NULL);
+	arrange(NULL);
+	updatecurrentdesktop();
+}
+
+void
 run(void)
 {
 	XEvent ev;
@@ -2360,6 +2516,47 @@ run(void)
 	while (running && !XNextEvent(dpy, &ev))
 		if (handler[ev.type])
 			handler[ev.type](&ev); /* call handler */
+}
+
+void
+savesession(void)
+{
+	Client *c;
+	Monitor *m;
+	char name[32];
+	int i, j, k;
+	long d[MONSTATELEN];
+
+	for (m = mons; m; m = m->next) {
+		for (c = m->clients; c; c = c->next) {
+			setclienttagprop(c);
+			/* undo showhide() so hidden floating clients keep their position */
+			XMoveWindow(dpy, c->win, c->x, c->y);
+		}
+		d[0] = LENGTH(tags);
+		d[1] = m->tagset[0];
+		d[2] = m->tagset[1];
+		d[3] = m->seltags;
+		d[4] = m->rmaster;
+		d[5] = m->gappx;
+		d[6] = m->pertag->curtag;
+		d[7] = m->pertag->prevtag;
+		d[8] = m == selmon;
+		d[9] = m->sel ? m->sel->win : None;
+		for (i = 0; i <= LENGTH(tags); i++) {
+			k = 10 + 6 * i;
+			d[k] = m->pertag->nmasters[i];
+			d[k + 1] = ftol(m->pertag->mfacts[i]);
+			d[k + 2] = m->pertag->sellts[i];
+			for (j = 0; j < 2; j++)
+				d[k + 3 + j] = m->pertag->ltidxs[i][j] - layouts;
+			d[k + 5] = m->pertag->showbars[i];
+		}
+		snprintf(name, sizeof name, "_DWM_MON_STATE_%d", m->num);
+		XChangeProperty(dpy, root, XInternAtom(dpy, name, False), XA_CARDINAL, 32,
+			PropModeReplace, (unsigned char *)d, MONSTATELEN);
+	}
+	XSync(dpy, False);
 }
 
 void
@@ -2401,6 +2598,7 @@ sendmon(Client *c, Monitor *m)
 	c->tags = m->tagset[m->seltags]; /* assign tags of target monitor */
 	attach(c);
 	attachstack(c);
+	setclienttagprop(c);
 	focus(NULL);
 	arrange(NULL);
 }
@@ -2412,6 +2610,23 @@ setclientstate(Client *c, long state)
 
 	XChangeProperty(dpy, c->win, wmatom[WMState], wmatom[WMState], 32,
 		PropModeReplace, (unsigned char *)data, 2);
+}
+
+void
+setclienttagprop(Client *c)
+{
+	Client *t;
+	long data[ClientInfoLast];
+	int i;
+
+	for (i = 0, t = c->mon->clients; t && t != c; t = t->next, i++);
+	data[ClientInfoTags] = c->tags;
+	data[ClientInfoMon] = c->mon->num;
+	data[ClientInfoFloating] = c->isfloating;
+	data[ClientInfoCfact] = ftol(c->cfact);
+	data[ClientInfoIndex] = i;
+	XChangeProperty(dpy, c->win, netatom[NetClientInfo], XA_CARDINAL, 32,
+		PropModeReplace, (unsigned char *)data, ClientInfoLast);
 }
 void
 setcurrentdesktop(void){
@@ -2612,6 +2827,7 @@ setup(void)
 	netatom[NetNumberOfDesktops] = XInternAtom(dpy, "_NET_NUMBER_OF_DESKTOPS", False);
 	netatom[NetCurrentDesktop] = XInternAtom(dpy, "_NET_CURRENT_DESKTOP", False);
 	netatom[NetDesktopNames] = XInternAtom(dpy, "_NET_DESKTOP_NAMES", False);
+	netatom[NetClientInfo] = XInternAtom(dpy, "_NET_CLIENT_INFO", False);
 	/* init cursors */
 	cursor[CurNormal] = drw_cur_create(drw, XC_left_ptr);
     cursor[CurHand] = drw_cur_create(drw, XC_hand2);
@@ -2647,6 +2863,7 @@ setup(void)
 	setviewport();
 	XDeleteProperty(dpy, root, netatom[NetClientList]);
 	XDeleteProperty(dpy, root, netatom[NetClientListStacking]);
+	XDeleteProperty(dpy, root, netatom[NetClientInfo]);
 	/* select events */
 	wa.cursor = cursor[CurNormal]->cursor;
 	wa.event_mask = SubstructureRedirectMask|SubstructureNotifyMask
@@ -2743,6 +2960,7 @@ tag(const Arg *arg)
 {
 	if (selmon->sel && arg->ui & TAGMASK) {
 		selmon->sel->tags = arg->ui & TAGMASK;
+		setclienttagprop(selmon->sel);
 		focus(NULL);
 		arrange(selmon);
 	}
@@ -2804,6 +3022,7 @@ tagswapmon(const Arg *arg)
 		c->tags = m->tagset[m->seltags]; /* assign tags of target monitor */
 		attach(c);
 		attachstack(c);
+		setclienttagprop(c);
 		if (c->isfullscreen) {
 			resizeclient(c, c->mon->mx, c->mon->my, c->mon->mw, c->mon->mh);
 			XRaiseWindow(dpy, c->win);
@@ -2816,6 +3035,7 @@ tagswapmon(const Arg *arg)
 		c->tags = selmon->tagset[selmon->seltags]; /* assign tags of target monitor */
 		attach(c);
 		attachstack(c);
+		setclienttagprop(c);
 		if (c->isfullscreen) {
 			resizeclient(c, c->mon->mx, c->mon->my, c->mon->mw, c->mon->mh);
 			XRaiseWindow(dpy, c->win);
@@ -2848,6 +3068,7 @@ tagallmon(const Arg *arg)
 		detachstack(c);
 		c->mon = m;
 		c->tags = m->tagset[m->seltags]; /* assign tags of target monitor */
+		setclienttagprop(c);
 		c->next = NULL;
 		c->snext = NULL;
 		if (last)
@@ -2996,6 +3217,7 @@ toggletag(const Arg *arg)
 	newtags = selmon->sel->tags ^ (arg->ui & TAGMASK);
 	if (newtags) {
 		selmon->sel->tags = newtags;
+		setclienttagprop(selmon->sel);
 		focus(NULL);
 		arrange(selmon);
 	}
@@ -3783,7 +4005,9 @@ main(int argc, char *argv[])
 		die("pledge");
 #endif /* __OpenBSD__ */
 	scan();
+	restoresession();
 	run();
+	savesession();
 	cleanup();
 	XCloseDisplay(dpy);
 	return EXIT_SUCCESS;
