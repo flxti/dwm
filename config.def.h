@@ -40,6 +40,8 @@ static const int nmaster     = 1;    /* number of clients in master area */
 static const int resizehints = 1;    /* 1 means respect size hints in tiled resizals */
 static const int lockfullscreen = 1; /* 1 will force focus on the fullscreen window */
 static const int refreshrate = 120;  /* refresh rate (per second) for client move/resize */
+static const int overviewfps = 30;   /* refresh rate (per second) of the overview previews */
+static const int overviewgap = 30;   /* gap between overview previews */
 
 static const Layout layouts[] = {
 	/* symbol     arrange function */
@@ -99,6 +101,8 @@ static const Key keys[] = {
 	TAGKEYS(                        XK_7,                      6)
 	TAGKEYS(                        XK_8,                      7)
 	TAGKEYS(                        XK_9,                      8)
+	{ MODKEY,                       XK_s,      overview,       {.i = 0 } },
+	{ MODKEY|ShiftMask,             XK_s,      overview,       {.i = 1 } },
 	{ MODKEY|ShiftMask,             XK_q,      quit,           {0} },
 	{ MODKEY,                       XK_o,      winview,        {0} },
 	{ Mod1Mask,                     XK_Tab,    alttab,         {0} },

@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <poll.h>
 #include <time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -100,15 +101,6 @@ typedef struct {
 typedef struct Monitor Monitor;
 typedef struct Client Client;
 
-typedef struct Preview Preview;
-struct Preview {
-  XImage *orig_image;
-  XImage *scaled_image;
-  Window win;
-  unsigned int x, y;
-  Preview *next;
-};
-
 struct Client {
 	char name[256];
 	float mina, maxa;
@@ -125,7 +117,6 @@ struct Client {
 	Client *snext;
 	Monitor *mon;
 	Window win;
-  Preview pre;
 };
 
 typedef struct {
@@ -139,6 +130,16 @@ typedef struct {
 	const char *symbol;
 	void (*arrange)(Monitor *);
 } Layout;
+
+typedef struct {
+	Client *c;
+	Monitor *m;
+	int tag;
+	int x, y, w, h;      /* preview geometry, relative to the monitor */
+	int cx, cy, cw, ch;  /* grid cell, used for pointer selection */
+	int ty;              /* title position */
+	int first, count, cols; /* grid of the monitor this item is on */
+} OverviewItem;
 
 typedef struct Pertag Pertag;
 struct Monitor {
@@ -233,6 +234,11 @@ static void motionnotify(XEvent *e);
 static void movemouse(const Arg *arg);
 static void moveorplace(const Arg *arg);
 static Client *nexttiled(Client *c);
+static void overview(const Arg *arg);
+static void overviewdraw(Monitor *m, Window win, Picture dst, OverviewItem *it, int n, int sel, int global);
+static int overviewitemat(OverviewItem *it, int n, int x, int y);
+static int overviewitems(OverviewItem *it, int global);
+static int overviewmons(Monitor **om, Window *ow, int nm);
 static void placemouse(const Arg *arg);
 static void pop(Client *c);
 static Client *prevtiled(Client *c);
@@ -245,6 +251,7 @@ static Monitor *recttomon(int x, int y, int w, int h);
 static void resize(Client *c, int x, int y, int w, int h, int interact);
 static void resizeclient(Client *c, int x, int y, int w, int h);
 static void resizemouse(const Arg *arg);
+static int resizemousemfact(Client *c);
 static void restack(Monitor *m);
 static void restoresession(void);
 static void run(void);
@@ -304,10 +311,6 @@ static int xerror(Display *dpy, XErrorEvent *ee);
 static int xerrordummy(Display *dpy, XErrorEvent *ee);
 static int xerrorstart(Display *dpy, XErrorEvent *ee);
 static void zoom(const Arg *arg);
-static void previewallwin();
-static void setpreviewwindowsizepositions(unsigned int n, Monitor *m, unsigned int gappo, unsigned int gappi);
-static XImage *getwindowximage(Client *c);
-static XImage *scaledownimage(XImage *orig_image, unsigned int cw, unsigned int ch);
 
 /* variables */
 static const char broken[] = "broken";
@@ -2032,6 +2035,324 @@ nexttiled(Client *c)
 	return c;
 }
 
+/* overview: live window previews of the selected monitor's visible clients
+ * (arg->i == 0) or of all clients on all monitors grouped by tag (arg->i == 1).
+ * Tab/arrows/hjkl select, Return/Button1 jump to the client, Escape/Button3
+ * cancel. Previews are XComposite window pixmaps scaled by XRender. */
+void
+overview(const Arg *arg)
+{
+	int i, n, nm, nr, sel, done = 0, redraw = 1;
+	Client *c, *target = NULL, **redir;
+	Monitor *m, **om;
+	OverviewItem *it;
+	Picture dst;
+	Window *ow;
+	XEvent ev;
+	XSetWindowAttributes wa;
+	XClassHint ch = { "dwm-overview", "dwm-overview" };
+	struct pollfd pfd = { .fd = ConnectionNumber(dpy), .events = POLLIN };
+	KeySym ks;
+
+	for (nm = 0, m = mons; m; m = m->next, nm++);
+	for (nr = 0, m = mons; m; m = m->next)
+		for (c = m->clients; c; c = c->next, nr++);
+	it = ecalloc(nr + 1, sizeof(OverviewItem));
+	if (!(n = overviewitems(it, arg->i))) {
+		free(it);
+		return;
+	}
+	for (sel = 0; sel < n && it[sel].c != selmon->sel; sel++);
+	sel = sel < n ? sel : 0;
+
+	if (XGrabKeyboard(dpy, root, True, GrabModeAsync, GrabModeAsync, CurrentTime) != GrabSuccess
+	|| XGrabPointer(dpy, root, False, ButtonPressMask|PointerMotionMask, GrabModeAsync,
+		GrabModeAsync, None, cursor[CurNormal]->cursor, CurrentTime) != GrabSuccess) {
+		XUngrabKeyboard(dpy, CurrentTime);
+		free(it);
+		return;
+	}
+
+	/* make sure all clients have a window pixmap, also without a compositor */
+	redir = ecalloc(nr + 1, sizeof(Client *));
+	XSetErrorHandler(xerrordummy);
+	for (i = 0, m = mons; m; m = m->next)
+		for (c = m->clients; c; c = c->next) {
+			XCompositeRedirectWindow(dpy, c->win, CompositeRedirectAutomatic);
+			redir[i++] = c;
+		}
+	XSync(dpy, False);
+	XSetErrorHandler(xerror);
+
+	om = ecalloc(nm, sizeof(Monitor *));
+	ow = ecalloc(nm, sizeof(Window));
+	wa.override_redirect = True;
+	wa.background_pixmap = None;
+	wa.event_mask = ExposureMask;
+	for (nm = 0, m = mons; m; m = m->next) {
+		if (!arg->i && m != selmon)
+			continue;
+		om[nm] = m;
+		ow[nm] = XCreateWindow(dpy, root, m->mx, m->my, m->mw, m->mh, 0,
+			DefaultDepth(dpy, screen), CopyFromParent, DefaultVisual(dpy, screen),
+			CWOverrideRedirect|CWBackPixmap|CWEventMask, &wa);
+		XSetClassHint(dpy, ow[nm], &ch);
+		XMapRaised(dpy, ow[nm++]);
+	}
+	dst = XRenderCreatePicture(dpy, drw->drawable,
+		XRenderFindVisualFormat(dpy, DefaultVisual(dpy, screen)), 0, NULL);
+
+	while (!done) {
+		if (redraw)
+			for (i = 0; i < nm; i++)
+				overviewdraw(om[i], ow[i], dst, it, n, sel, arg->i);
+		redraw = 0;
+		if (!XPending(dpy) && poll(&pfd, 1, 1000 / overviewfps) <= 0) {
+			redraw = 1; /* refresh live previews */
+			continue;
+		}
+		XNextEvent(dpy, &ev);
+		switch (ev.type) {
+		case KeyPress:
+			ks = XLookupKeysym(&ev.xkey, 0);
+			for (i = 0; i < LENGTH(keys); i++)
+				if (keys[i].func == overview && keys[i].keysym == ks
+				&& CLEANMASK(keys[i].mod) == CLEANMASK(ev.xkey.state))
+					ks = XK_Tab; /* repeating the binding cycles */
+			if (ks == XK_Escape)
+				done = 1;
+			else if (ks == XK_Return || ks == XK_KP_Enter || ks == XK_space)
+				done = 1, target = it[sel].c;
+			else if (ks == XK_Tab)
+				sel = (sel + (ev.xkey.state & ShiftMask ? n - 1 : 1)) % n;
+			else if (ks == XK_Right || ks == XK_l)
+				sel = (sel + 1) % n;
+			else if (ks == XK_Left || ks == XK_h)
+				sel = (sel + n - 1) % n;
+			else if ((ks == XK_Down || ks == XK_j)
+			&& sel + it[sel].cols < it[sel].first + it[sel].count)
+				sel += it[sel].cols;
+			else if ((ks == XK_Up || ks == XK_k) && sel - it[sel].cols >= it[sel].first)
+				sel -= it[sel].cols;
+			redraw = 1;
+			break;
+		case ButtonPress:
+			if (ev.xbutton.button == Button1) {
+				if ((i = overviewitemat(it, n, ev.xbutton.x_root, ev.xbutton.y_root)) >= 0)
+					done = 1, target = it[i].c;
+			} else if (ev.xbutton.button == Button3)
+				done = 1;
+			else if (ev.xbutton.button == Button4)
+				sel = (sel + n - 1) % n;
+			else if (ev.xbutton.button == Button5)
+				sel = (sel + 1) % n;
+			redraw = 1;
+			break;
+		case MotionNotify:
+			if ((i = overviewitemat(it, n, ev.xmotion.x_root, ev.xmotion.y_root)) >= 0
+			&& i != sel)
+				sel = i, redraw = 1;
+			break;
+		case Expose:
+			redraw = 1;
+			/* fallthrough */
+		default:
+			if (handler[ev.type])
+				handler[ev.type](&ev);
+			if (ev.type == MapRequest || ev.type == DestroyNotify || ev.type == UnmapNotify
+			|| (ev.type == ConfigureNotify && ev.xconfigure.window == root)) {
+				/* clients changed, rebuild the previews */
+				c = it[sel].c;
+				if (!(n = overviewitems(it, arg->i)) || nm != overviewmons(om, ow, nm))
+					done = 1;
+				for (sel = 0; sel < n && it[sel].c != c; sel++);
+				sel = sel < n ? sel : 0;
+				for (i = 0; i < nm; i++)
+					XRaiseWindow(dpy, ow[i]);
+				redraw = 1;
+			}
+			break;
+		}
+	}
+
+	XRenderFreePicture(dpy, dst);
+	for (i = 0; i < nm; i++)
+		XDestroyWindow(dpy, ow[i]);
+	XSetErrorHandler(xerrordummy);
+	for (i = 0; redir[i]; i++)
+		XCompositeUnredirectWindow(dpy, redir[i]->win, CompositeRedirectAutomatic);
+	XSync(dpy, False);
+	XSetErrorHandler(xerror);
+	XUngrabPointer(dpy, CurrentTime);
+	XUngrabKeyboard(dpy, CurrentTime);
+	free(redir);
+	free(om);
+	free(ow);
+	free(it);
+	XSync(dpy, False);
+	while (XCheckMaskEvent(dpy, EnterWindowMask, &ev));
+
+	if (target) {
+		if (target->mon != selmon) {
+			unfocus(selmon->sel, 0);
+			selmon = target->mon;
+		}
+		if (!ISVISIBLE(target))
+			view(&((Arg) { .ui = target->tags }));
+		focus(target);
+		restack(selmon);
+	} else
+		drawbars();
+}
+
+void
+overviewdraw(Monitor *m, Window win, Picture dst, OverviewItem *it, int n, int sel, int global)
+{
+	int i, b = borderpx + 2;
+	char label[256 + 32];
+	double sx, sy;
+	Client *c;
+	Picture src;
+	Pixmap pix;
+	XRenderPictFormat *fmt;
+	XRenderPictureAttributes pa = { .subwindow_mode = IncludeInferiors };
+	XTransform xf = {{{ 0 }}};
+	XWindowAttributes wa;
+
+	drw_setscheme(drw, scheme[SchemeNorm]);
+	drw_rect(drw, 0, 0, m->mw, m->mh, 1, 1);
+	XSetErrorHandler(xerrordummy);
+	for (i = 0; i < n; i++) {
+		if (it[i].m != m)
+			continue;
+		c = it[i].c;
+		drw_setscheme(drw, scheme[i == sel ? SchemeSel : SchemeNorm]);
+		if (i == sel)
+			drw_rect(drw, it[i].x - b, it[i].y - b, it[i].w + 2 * b, it[i].h + 2 * b, 1, 1);
+		if (global)
+			snprintf(label, sizeof label, "%s: %s", tags[it[i].tag], c->name);
+		else
+			snprintf(label, sizeof label, "%s", c->name);
+		drw_text(drw, it[i].x - b, it[i].ty, it[i].w + 2 * b, bh, lrpad / 2, label, 0);
+
+		if (!XGetWindowAttributes(dpy, c->win, &wa)
+		|| !(fmt = XRenderFindVisualFormat(dpy, wa.visual))
+		|| !(pix = XCompositeNameWindowPixmap(dpy, c->win)))
+			continue;
+		src = XRenderCreatePicture(dpy, pix, fmt, CPSubwindowMode, &pa);
+		sx = (wa.width + 2.0 * wa.border_width) / it[i].w;
+		sy = (wa.height + 2.0 * wa.border_width) / it[i].h;
+		xf.matrix[0][0] = XDoubleToFixed(sx);
+		xf.matrix[1][1] = XDoubleToFixed(sy);
+		xf.matrix[2][2] = XDoubleToFixed(1.0);
+		XRenderSetPictureTransform(dpy, src, &xf);
+		XRenderSetPictureFilter(dpy, src, FilterBilinear, NULL, 0);
+		XRenderComposite(dpy, fmt->type == PictTypeDirect && fmt->direct.alphaMask
+			? PictOpOver : PictOpSrc, src, None, dst, 0, 0, 0, 0,
+			it[i].x, it[i].y, it[i].w, it[i].h);
+		XRenderFreePicture(dpy, src);
+		XFreePixmap(dpy, pix);
+	}
+	XSync(dpy, False);
+	XSetErrorHandler(xerror);
+	drw_map(drw, win, 0, 0, m->mw, m->mh);
+}
+
+int
+overviewitemat(OverviewItem *it, int n, int x, int y)
+{
+	int i;
+
+	for (i = 0; i < n; i++)
+		if (x >= it[i].m->mx + it[i].cx && x < it[i].m->mx + it[i].cx + it[i].cw
+		&& y >= it[i].m->my + it[i].cy && y < it[i].m->my + it[i].cy + it[i].ch)
+			return i;
+	return -1;
+}
+
+/* collects the previewed clients and lays them out in a grid per monitor */
+int
+overviewitems(OverviewItem *it, int global)
+{
+	int i, j, k, n = 0, first, cnt, cols, rows, best, cw, ch, x, y, rowcnt;
+	double s, area, bestarea;
+	Client *c;
+	Monitor *m;
+	const int g = overviewgap;
+
+	for (m = mons; m; m = m->next) {
+		if (!global && m != selmon)
+			continue;
+		first = n;
+		for (i = 0; i < (global ? LENGTH(tags) : 1); i++)
+			for (c = m->clients; c; c = c->next)
+				if (global ? (c->tags & -c->tags) == 1U << i : ISVISIBLE(c)) {
+					it[n].c = c;
+					it[n].m = m;
+					it[n++].tag = i;
+				}
+		if (!(cnt = n - first))
+			continue;
+
+		/* pick the column count that gives the largest total preview area */
+		for (best = 1, bestarea = -1, cols = 1; cols <= cnt; cols++) {
+			rows = (cnt + cols - 1) / cols;
+			cw = (m->mw - (cols + 1) * g) / cols;
+			ch = (m->mh - (rows + 1) * g) / rows - bh;
+			if (cw <= 0 || ch <= 0)
+				continue;
+			for (area = 0, i = first; i < n; i++) {
+				s = MIN(MIN((double)cw / WIDTH(it[i].c), (double)ch / HEIGHT(it[i].c)), 1.0);
+				area += s * WIDTH(it[i].c) * s * HEIGHT(it[i].c);
+			}
+			if (area > bestarea)
+				bestarea = area, best = cols;
+		}
+		cols = best;
+		rows = (cnt + cols - 1) / cols;
+		cw = MAX((m->mw - (cols + 1) * g) / cols, 1);
+		ch = MAX((m->mh - (rows + 1) * g) / rows - bh, 1);
+		y = (m->mh - rows * (ch + bh) - (rows - 1) * g) / 2;
+		for (j = 0, i = first; j < rows; j++, y += ch + bh + g) {
+			rowcnt = MIN(cols, n - i);
+			x = (m->mw - rowcnt * cw - (rowcnt - 1) * g) / 2;
+			for (k = 0; k < rowcnt; k++, i++, x += cw + g) {
+				c = it[i].c;
+				s = MIN(MIN((double)cw / WIDTH(c), (double)ch / HEIGHT(c)), 1.0);
+				it[i].w = MAX(s * WIDTH(c), 1);
+				it[i].h = MAX(s * HEIGHT(c), 1);
+				it[i].x = x + (cw - it[i].w) / 2;
+				it[i].y = y + (ch - it[i].h) / 2;
+				it[i].ty = MIN(it[i].y + it[i].h + borderpx + 4, y + ch);
+				it[i].cx = x;
+				it[i].cy = y;
+				it[i].cw = cw;
+				it[i].ch = ch + bh;
+				it[i].first = first;
+				it[i].count = cnt;
+				it[i].cols = cols;
+			}
+		}
+	}
+	return n;
+}
+
+/* keeps the overlay windows in sync with the monitor geometry */
+int
+overviewmons(Monitor **om, Window *ow, int nm)
+{
+	int i, n;
+	Monitor *m;
+
+	for (n = 0, m = mons; m; m = m->next)
+		for (i = 0; i < nm; i++)
+			if (om[i] == m) {
+				XMoveResizeWindow(dpy, ow[i], m->mx, m->my, m->mw, m->mh);
+				n++;
+			}
+	return n;
+}
+
 void
 placemouse(const Arg *arg)
 {
@@ -2340,6 +2661,8 @@ resizemouse(const Arg *arg)
 		return;
 	if (c->isfullscreen && c->fakefullscreen != 1) /* no support resizing fullscreen windows by mouse */
 		return;
+	if (!c->isfloating && resizemousemfact(c))
+		return;
 	restack(selmon);
 	ocx = c->x;
 	ocy = c->y;
@@ -2388,6 +2711,62 @@ resizemouse(const Arg *arg)
 		selmon = m;
 		focus(NULL);
 	}
+}
+
+/* resize tiled clients by dragging the master/stack border instead of
+ * making them float; returns 0 if the layout has no such border */
+int
+resizemousemfact(Client *c)
+{
+	int n, dir, opx, opy;
+	float f, omfact;
+	Client *t;
+	Monitor *m = c->mon;
+	XEvent ev;
+	Time lasttime = 0;
+	void (*arrange)(Monitor *) = m->lt[m->sellt]->arrange;
+
+	for (n = 0, t = nexttiled(m->clients); t; t = nexttiled(t->next), n++);
+	if (arrange == centeredmonocle)
+		dir = 2;
+	else if ((arrange == tile || arrange == deck || arrange == centeredmaster
+	|| (arrange == centeredfloatingmaster && m->ww > m->wh))
+	&& m->nmaster && n > m->nmaster)
+		/* centered masters grow on both sides, so move twice as fast */
+		dir = arrange == centeredfloatingmaster
+			|| (arrange == centeredmaster && n - m->nmaster > 1) ? 2 : 1;
+	else
+		return 0;
+	if (!getrootptr(&opx, &opy))
+		return 0;
+	if (dir == 2 && opx < m->wx + m->ww / 2)
+		dir = -2;
+	omfact = m->mfact;
+	if (XGrabPointer(dpy, root, False, MOUSEMASK, GrabModeAsync, GrabModeAsync,
+		None, cursor[CurResizeHorzArrow]->cursor, CurrentTime) != GrabSuccess)
+		return 1;
+	do {
+		XMaskEvent(dpy, MOUSEMASK|ExposureMask|SubstructureRedirectMask, &ev);
+		switch(ev.type) {
+		case ConfigureRequest:
+		case Expose:
+		case MapRequest:
+			handler[ev.type](&ev);
+			break;
+		case MotionNotify:
+			if ((ev.xmotion.time - lasttime) <= (1000 / refreshrate))
+				continue;
+			lasttime = ev.xmotion.time;
+			f = omfact + dir * (ev.xmotion.x - opx) / (float)m->ww;
+			f = MAX(0.05, MIN(0.95, f));
+			if (f != m->mfact)
+				setmfact(&((Arg) { .f = 1.0 + f }));
+			break;
+		}
+	} while (ev.type != ButtonRelease);
+	XUngrabPointer(dpy, CurrentTime);
+	while (XCheckMaskEvent(dpy, EnterWindowMask, &ev));
+	return 1;
 }
 
 void
@@ -3770,221 +4149,6 @@ zoom(const Arg *arg)
 	if (c == nexttiled(selmon->clients) && !(c = nexttiled(c->next)))
 		return;
 	pop(c);
-}
-
-void
-previewallwin(){
-  int composite_event_base, composite_error_base;
-  if (!XCompositeQueryExtension(dpy, &composite_event_base, &composite_error_base)) {
-    fprintf(stderr, "Error: XComposite extension not available.\n");
-    return;
-  }
-  Monitor *m = selmon;
-  Client *c, *focus_c = NULL;
-  unsigned int n;
-  for (n = 0, c = m->clients; c; c = c->next, n++){
-    /* If you hit actualfullscreen patch Unlock the notes below */
-    // if (c->isfullscreen)
-    //   togglefullscr(&(Arg){0});
-    /* If you hit awesomebar patch Unlock the notes below */
-    // if (HIDDEN(c))
-    //   continue;
-    c->pre.orig_image = getwindowximage(c);
-  }
-  if (n == 0)
-    return;
-  setpreviewwindowsizepositions(n, m, 60, 15);
-  XEvent event;
-  for(c = m->clients; c; c = c->next){
-    if (!c->pre.win)
-      c->pre.win = XCreateSimpleWindow(dpy, root, c->pre.x, c->pre.y, c->pre.scaled_image->width, c->pre.scaled_image->height, 1, BlackPixel(dpy, screen), WhitePixel(dpy, screen));
-    else
-      XMoveResizeWindow(dpy, c->pre.win, c->pre.x, c->pre.y, c->pre.scaled_image->width, c->pre.scaled_image->height);
-    XSetWindowBorder(dpy, c->pre.win, scheme[SchemeNorm][ColBorder].pixel);
-    XSetWindowBorderWidth(dpy, c->pre.win, borderpx);
-    XUnmapWindow(dpy, c->win);
-    if (c->pre.win){
-      XSelectInput(dpy, c->pre.win, ButtonPress | EnterWindowMask | LeaveWindowMask );
-      XMapWindow(dpy, c->pre.win);
-      XPutImage(dpy, c->pre.win, drw->gc, c->pre.scaled_image, 0, 0, 0, 0, c->pre.scaled_image->width, c->pre.scaled_image->height);
-    }
-  }
-  while (1) {
-      XNextEvent(dpy, &event);
-      if ((event.type == ButtonPress && event.xbutton.button == Button1)
-          || (event.type == KeyPress && XLookupKeysym(&event.xkey, 0) == XK_Return)){
-            for(c = m->clients; c; c = c->next){
-              XUnmapWindow(dpy, c->pre.win);
-              if ((focus_c && focus_c == c) || (event.xbutton.window == c->pre.win || event.xkey.subwindow == c->pre.win)){
-                selmon->seltags ^= 1; /* toggle sel tagset */
-                m->tagset[selmon->seltags] = c->tags;
-                focus_c = c;
-                focus(NULL);
-                /* If you hit awesomebar patch Unlock the notes below */
-                // if (HIDDEN(c)){
-                //   showwin(c);
-                //   continue;
-                // }
-              }
-              /* If you hit awesomebar patch Unlock the notes below; 
-               * And you should add the following line to "hidewin" Function
-               * c->pre.orig_image = getwindowximage(c);
-               * */
-              // if (HIDDEN(c)){
-              //   continue;
-              // }
-              XMapWindow(dpy, c->win);
-              XDestroyImage(c->pre.orig_image);
-              XDestroyImage(c->pre.scaled_image);
-            }
-            break;
-          }
-      if (event.type == EnterNotify)
-          for(c = m->clients; c; c = c->next)
-              if (event.xcrossing.window == c->pre.win){
-                  XSetWindowBorder(dpy, c->pre.win, scheme[SchemeSel][ColBorder].pixel);
-                  break;
-              }
-      if (event.type == LeaveNotify)
-          for(c = m->clients; c; c = c->next)
-              if (event.xcrossing.window == c->pre.win){
-                  XSetWindowBorder(dpy, c->pre.win, scheme[SchemeNorm][ColBorder].pixel);
-                  break;
-              }
-      if (event.type == KeyPress && XLookupKeysym(&event.xkey, 0) == XK_a)
-          for(c = m->clients; c; c = c->next)
-              if (event.xkey.subwindow == c->pre.win){
-                  Client* new_c = c->next ? c->next : m->clients;
-                  XSetWindowBorder(dpy, new_c->pre.win, scheme[SchemeSel][ColBorder].pixel);
-                  XSetWindowBorder(dpy, c->pre.win, scheme[SchemeNorm][ColBorder].pixel);
-                  focus_c = new_c;
-                  break;
-              }
-  }
-  arrange(m);
-  focus(focus_c);
-}
-
-void
-setpreviewwindowsizepositions(unsigned int n, Monitor *m, unsigned int gappo, unsigned int gappi){
-  unsigned int i, j;
-  unsigned int cx, cy, cw, ch, cmaxh;
-  unsigned int cols, rows;
-  Client *c, *tmpc;
-
-  if (n == 1) {
-    c = m->clients;
-    cw = (m->ww - 2 * gappo) * 0.8;
-    ch = (m->wh - 2 * gappo) * 0.9;
-    c->pre.scaled_image = scaledownimage(c->pre.orig_image, cw, ch);
-    c->pre.x = m->mx + (m->mw - c->pre.scaled_image->width) / 2;
-    c->pre.y = m->my + (m->mh - c->pre.scaled_image->height) / 2;
-    return;
-  }
-  if (n == 2) {
-    c = m->clients;
-    cw = (m->ww - 2 * gappo - gappi) / 2;
-    ch = (m->wh - 2 * gappo) * 0.7;
-    c->pre.scaled_image = scaledownimage(c->pre.orig_image, cw, ch);
-    c->next->pre.scaled_image = scaledownimage(c->next->pre.orig_image, cw, ch);
-    c->pre.x = m->mx + (m->mw - c->pre.scaled_image->width - gappi - c->next->pre.scaled_image->width) / 2;
-    c->pre.y = m->my + (m->mh - c->pre.scaled_image->height) / 2;
-    c->next->pre.x = c->pre.x + c->pre.scaled_image->width + gappi;
-    c->next->pre.y = m->my + (m->mh - c->next->pre.scaled_image->height) / 2;
-    return;
-  }
-  for (cols = 0; cols <= n / 2; cols++)
-    if (cols * cols >= n)
-      break;
-  rows = (cols && (cols - 1) * cols >= n) ? cols - 1 : cols;
-  ch = (m->wh - 2 * gappo) / rows;
-  cw = (m->ww - 2 * gappo) / cols;
-  c = m->clients;
-  cy = 0;
-  for (i = 0; i < rows; i++) {
-    cx = 0;
-    cmaxh = 0;
-    tmpc = c;
-    for (int j = 0; j < cols; j++) {
-      if (!c)
-        break;
-      c->pre.scaled_image = scaledownimage(c->pre.orig_image, cw, ch);
-      c->pre.x = cx;
-      cmaxh = c->pre.scaled_image->height > cmaxh ? c->pre.scaled_image->height : cmaxh;
-      cx += c->pre.scaled_image->width + gappi;
-      c = c->next;
-    }
-    c = tmpc;
-    cx = m->wx + (m->ww - cx) / 2;
-    for (j = 0; j < cols; j++) {
-      if (!c)
-        break;
-      c->pre.x += cx;
-      c->pre.y = cy + (cmaxh - c->pre.scaled_image->height) / 2;
-      c = c->next;
-    }
-    cy += cmaxh + gappi;
-  }
-  cy = m->wy + (m->wh - cy) / 2;
-  for (c = m->clients; c; c = c->next)
-    c->pre.y += cy;
-}
-
-XImage
-*getwindowximage(Client *c) {
-  XCompositeRedirectWindow(dpy, c->win, CompositeRedirectAutomatic);
-  XWindowAttributes attr;
-  XGetWindowAttributes( dpy, c->win, &attr );
-  XRenderPictFormat *format = XRenderFindVisualFormat( dpy, attr.visual );
-  int hasAlpha = ( format->type == PictTypeDirect && format->direct.alphaMask );
-  XRenderPictureAttributes pa;
-  pa.subwindow_mode = IncludeInferiors;
-  Picture picture = XRenderCreatePicture( dpy, c->win, format, CPSubwindowMode, &pa );
-  Pixmap pixmap = XCreatePixmap(dpy, root, c->w, c->h, 32);
-  XRenderPictureAttributes pa2;
-  XRenderPictFormat *format2 = XRenderFindStandardFormat(dpy, PictStandardARGB32);
-  Picture pixmapPicture = XRenderCreatePicture( dpy, pixmap, format2, 0, &pa2 );
-  XRenderColor color;
-  color.red = 0x0000;
-  color.green = 0x0000;
-  color.blue = 0x0000;
-  color.alpha = 0x0000;
-  XRenderFillRectangle (dpy, PictOpSrc, pixmapPicture, &color, 0, 0, c->w, c->h);
-  XRenderComposite(dpy, hasAlpha ? PictOpOver : PictOpSrc, picture, 0,
-                   pixmapPicture, 0, 0, 0, 0, 0, 0,
-                   c->w, c->h);
-  XImage* temp = XGetImage( dpy, pixmap, 0, 0, c->w, c->h, AllPlanes, ZPixmap );
-  temp->red_mask = format2->direct.redMask << format2->direct.red;
-  temp->green_mask = format2->direct.greenMask << format2->direct.green;
-  temp->blue_mask = format2->direct.blueMask << format2->direct.blue;
-  temp->depth = DefaultDepth(dpy, screen);
-  XCompositeUnredirectWindow(dpy, c->win, CompositeRedirectAutomatic);
-  return temp;
-}
-
-XImage
-*scaledownimage(XImage *orig_image, unsigned int cw, unsigned int ch) {
-  int factor_w = orig_image->width / cw + 1;
-  int factor_h = orig_image->height / ch + 1;
-  int scale_factor = factor_w > factor_h ? factor_w : factor_h;
-  int scaled_width = orig_image->width / scale_factor;
-  int scaled_height = orig_image->height / scale_factor;
-  XImage *scaled_image = XCreateImage(dpy, DefaultVisual(dpy, DefaultScreen(dpy)),
-                                      orig_image->depth,
-                                      ZPixmap, 0, NULL,
-                                      scaled_width, scaled_height,
-                                      32, 0);
-  scaled_image->data = malloc(scaled_image->height * scaled_image->bytes_per_line);
-  for (int y = 0; y < scaled_height; y++) {
-      for (int x = 0; x < scaled_width; x++) {
-          int orig_x = x * scale_factor;
-          int orig_y = y * scale_factor;
-          unsigned long pixel = XGetPixel(orig_image, orig_x, orig_y);
-          XPutPixel(scaled_image, x, y, pixel);
-      }
-  }
-  scaled_image->depth = orig_image->depth;
-  return scaled_image;
 }
 
 int
